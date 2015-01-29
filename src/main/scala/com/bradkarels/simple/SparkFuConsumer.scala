@@ -6,6 +6,7 @@ import org.apache.spark.streaming.Seconds
 import org.apache.spark.streaming.StreamingContext
 import org.apache.spark.streaming.StreamingContext._
 import org.apache.spark.streaming.kafka.KafkaUtils
+import org.apache.spark.rdd.RDD
 import kafka.serializer.StringDecoder
 import akka.dispatch.Foreach
 import com.datastax.spark.connector._
@@ -16,32 +17,18 @@ import scala.util.Random
 import org.apache.log4j.Logger
 import org.apache.log4j.LogManager
 
-class SparkFuEvent(
-  val year: Int,
-  val month: Int,
-  val day: Int,
-  val hour: Int,
-  val minute: Int,
-  val second: Int,
-  val millis: Int,
-  val msg: String // What happened yo!?
-)
-
 object Consumer {
   
   def main(args: Array[String]) {
     
-    val log:Logger = LogManager.getLogger("Streaming Kafka Consumer - 0")
+    // Enable logging in $SPARK_HOME/CONF/log4j.properties - logs to console by default.
+    val log:Logger = LogManager.getLogger("Streaming Kafka Consumer - Spark-Fu!")
     
-    // TODO: (YOCO?) Pull in per environment config elements (e.g. cassandra host value)
     val sc = new SparkConf(true)
-      .set("spark.cassandra.connection.host", "10.11.60.43")  //  dev-cassandra1 - 10.11.60.43 
-      .setAppName("StreamingKafkaConsumer0")
-//      .set("spark.cleaner.ttl", "3600") // Persistent RDDs that are older than that value are periodically cleared
-//      .setMaster("local[12]")
+      .set("spark.cassandra.connection.host", "127.0.0.1")
+      .setAppName("StreamingKafkaConsumer")
       
     val ssc:StreamingContext = new StreamingContext(sc, Seconds(3))
-    
     
     // http://kafka.apache.org/08/configuration.html -> See section 3.2 Consumer Configs
     val kafkaParams = Map(
@@ -55,30 +42,25 @@ object Consumer {
       "sparkfu" -> 1
     )
 
+    // Assuming very small data volumes for example app - tune as necessary.
     val storageLevel = StorageLevel.MEMORY_ONLY
   
     val messages = KafkaUtils.createStream[String, String, StringDecoder, StringDecoder](ssc, kafkaParams, topics, storageLevel)
     messages.foreachRDD { rdd => 
-      val x = rdd.map { y => (randomString(25), y._2) }
-      x.saveToCassandra("sparkfu","messages",SomeColumns("key","msg"))
+      val message:RDD[(String, String)] = rdd.map { y => (randomString(25), y._2) }
+      message.saveToCassandra("sparkfu", "messages", SomeColumns("key","msg"))
     }
 
-    //TODO: Try direct w/o foreachRDD ->
-    //messages.saveToCassandra("sparkfu","messages",SomeColumns("key","msg"))
-
+    // Listen for SIGTERM and shutdown gracefully.
     sys.ShutdownHookThread {
       log.info("Gracefully stopping Spark Streaming Application")
+      //ssc.stop(stopSparkContext = true, stopGracefully = true)
       ssc.stop(true, true)
       log.info("Application stopped")
     } 
    
     ssc.start()             // Start the computation
     ssc.awaitTermination()  // Wait for the computation to terminate (manually or due to any error)
-//    ssc.stop(stopSparkContext = true, stopGracefully = true)
-  }
-  
-  def blather(p:Boolean, msg:String):Unit = {
-    if (p) println(msg)
   }
 
   @tailrec
