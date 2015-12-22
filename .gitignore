@@ -4,3 +4,4 @@ project/target/
 .project
 .cache
 /bin
+.settings/
